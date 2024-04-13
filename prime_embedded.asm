@@ -37,17 +37,20 @@
     ; and then add the new digit, assuming that it is in the 1's place.
     ; This will ensure that, whenever we finally encounter '\n', the
     ; accumulator (r0) will already store the correct, final value.
-    loadLiteral 0 r0 ; Clear r0 to use as a counter
+
+
+    loadLiteral 0 r0 ; Clear r0 to use as a counter r0 is the counter here
 loop:
     ; Read the next character into r3
     read r3
 
     ; Check to see whether we read '\n'. If so, break out of the
     ; loop.
-    eq r3 10 r4           ; r4 = r3 == '\n'
-    loadLiteral 1024 r2
-    add r2 .after_loop r2 ; Store 1024 + .after_loop in r2
-    cmove r4 r2 r7        ; If r3 == '\n', break out of the loop
+
+    eq r3 10 r4           ; r4 = r3 == '\n' r4 is a boolean here 
+    loadLiteral 1024 r2     ; ===========================================================
+    add r2 .after_loop r2 ; Store 1024 + .after_loop in r2 
+    cmove r4 r2 r7        ; If r3 == '\n', break out of the loop   
     
     ; As described above, since we've read a new digit, we know that
     ; all previous digits we read have values 10 times higher than
