@@ -9,11 +9,21 @@ import "fmt"
 // The state kept by the CPU in order to implement kernel support.
 type kernelCpuState struct {
 	// TODO: Fill this in.
+	Mode              string // user or kernel mode
+	InterruptsEnabled bool
+	SyscallID         int
+	TrapHandlerAddr   uint32
+	TimerTickCount    uint32
 }
 
 // The initial kernel state when the CPU boots.
 var initKernelCpuState = kernelCpuState{
 	// TODO: Fill this in.
+	Mode:              "kernel",
+	InterruptsEnabled: false,
+	SyscallID:         -1,     // no syscall
+	TrapHandlerAddr:   0x0000, // need to figure out where the trap handler is at?
+	TimerTickCount:    0,
 }
 
 // A hook which is executed at the beginning of each instruction step.
@@ -28,6 +38,35 @@ var initKernelCpuState = kernelCpuState{
 // will immediately return without any further execution.
 func (k *kernelCpuState) preExecuteHook(c *cpu) (bool, error) {
 	// TODO: Fill this in.
+
+	// get the current iptr
+	iptr := c.registers[7]
+	if int(iptr) >= len(c.memory) {
+		return false, fmt.Errorf("instr pointer out of bounds: %v", iptr)
+
+	}
+
+	// the actual instruction at to be executed
+	instr := c.memory[int(iptr)]
+
+	decodedInstr, err := c.instructions.decode(instr)
+
+	if err != nil {
+		return false, fmt.Errorf("Trying to decode the instruction failed: %v", err)
+	}
+
+	privilegedInstructions := map[string]bool{
+		"halt":  true,
+		"read":  true,
+		"write": true,
+	}
+
+	if k.Mode == "user" {
+		if _, ok := privilegedInstructions[decodedInstr.def.name]; ok {
+			return false, fmt.Errorf("user program tried to use the follwing instruction: %s", decodedInstr.def.name)
+		}
+	}
+
 	return false, nil
 }
 
@@ -77,7 +116,28 @@ func init() {
 			name: "syscall",
 			cb: func(c *cpu, args [3]byte) error {
 				// TODO: Fill this in.
-				return fmt.Errorf("unimplemented")
+
+				syscallNum := args[0]
+				switch syscallNum {
+				case 0: // read
+					// read byte
+					// set the lowest byte of r6 to what is read
+					// set all other bytes to 0
+					readArgs := [3]byte{6, 0, 0} // putting args[0] to be 6 to correlate to r6
+					return instrRead.cb(c, readArgs)
+
+				case 1: // write
+					// write the lowest byte of r6 to the output devide
+					writeArgs := [3]byte{6, 0, 0} // putting args[0] to be 6 to correlate to r6
+					return instrWrite.cb(c, writeArgs)
+
+				case 2: // exit
+					fmt.Println("Program has exited")
+					// halt the cpu
+					return instrHalt.cb(c, [3]byte{}) // just call halt
+				default:
+					return fmt.Errorf("this syscall is undefined %d", syscallNum)
+				}
 			},
 			validate: nil,
 		}
