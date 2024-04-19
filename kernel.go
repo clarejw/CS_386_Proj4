@@ -7,6 +7,10 @@ import "fmt"
 // All of your CPU emulator changes for Assignment 2 will go in this file.
 
 // The state kept by the CPU in order to implement kernel support.
+
+//everytime you jump from user mode to kernel mode you need to go to the same address -- trapAddress -- callback to this address when an error occurs
+
+// need to keep track of the time slicing operations such as the timer, instructions within a slice, etc
 type kernelCpuState struct {
 	// TODO: Fill this in.
 	Mode              string // user or kernel mode
@@ -36,24 +40,31 @@ var initKernelCpuState = kernelCpuState{
 //
 // If `preExecuteHook` returns `true`, the instruction is "skipped": `cpu.step`
 // will immediately return without any further execution.
+
+// runs before an instruction is even decoded
+// need to go back to checking time slice problem here
+// all logic that does NOT care about whatever instruction is going to be ran goes here
+
 func (k *kernelCpuState) preExecuteHook(c *cpu) (bool, error) {
 	// TODO: Fill this in.
 
 	// get the current iptr
-	iptr := c.registers[7]
+	iptr := c.registers[7] //ptr lives at r7
 	if int(iptr) >= len(c.memory) {
-		return false, fmt.Errorf("instr pointer out of bounds: %v", iptr)
+		return true, fmt.Errorf("instr pointer out of bounds: %v", iptr) // halt and go back to kernel state
 
 	}
 
 	// the actual instruction at to be executed
 	instr := c.memory[int(iptr)]
 
-	_, err := c.instructions.decode(instr) // do i need the decodedInstr???
+	_, err := c.instructions.decode(instr) // do i need the decodedInstr??? YES
 
 	if err != nil {
-		return false, fmt.Errorf("Trying to decode the instruction failed: %v", err)
+		return true, fmt.Errorf("Trying to decode the instruction failed: %v", err) //this isto mitigate vulnerability at main.go 181  // halt and go back to kernel state
 	}
+
+	// need a way to also check it fails to execute an instruction too
 
 	return false, nil
 }
@@ -88,6 +99,7 @@ func init() {
 	// support.
 
 	// hook to deny read for user
+	// everytime a priviledged instr happens -- we need the CPU to switch back to the kernel mode and then tell the kernel we switched back because of an illegal instr
 	instrRead.addHook(func(c *cpu, args [3]uint8) (bool, error) {
 		if c.kernel.Mode == "user" {
 			return false, fmt.Errorf("privileged instruction 'read' attempted in user mode")
@@ -155,6 +167,8 @@ func init() {
 		}
 
 		// TODO: Add other instructions that can be used to implement a kernel.
+
+		// we need a way to add the ability to set the internal state of the cpu --- go back in lecture around 45 mins -- something with traphandler
 	)
 
 	// Add kernel instructions to the instruction set.

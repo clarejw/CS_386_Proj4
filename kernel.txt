@@ -1,0 +1,12 @@
+What is the fucntionality of kernel.asm here?
+
+
+- go code is just emulating what an actual CPU would be doing
+    - state of the cpu
+    - behaviors it needs to enforce
+
+
+for instructions restrictions
+    - is this assembly stuff or the cpu struct stuff supposed to handle this?
+
+what does the trapaddress do? how do we increment? 
