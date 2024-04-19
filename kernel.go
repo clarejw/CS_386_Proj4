@@ -49,22 +49,10 @@ func (k *kernelCpuState) preExecuteHook(c *cpu) (bool, error) {
 	// the actual instruction at to be executed
 	instr := c.memory[int(iptr)]
 
-	decodedInstr, err := c.instructions.decode(instr)
+	_, err := c.instructions.decode(instr) // do i need the decodedInstr???
 
 	if err != nil {
 		return false, fmt.Errorf("Trying to decode the instruction failed: %v", err)
-	}
-
-	privilegedInstructions := map[string]bool{
-		"halt":  true,
-		"read":  true,
-		"write": true,
-	}
-
-	if k.Mode == "user" {
-		if _, ok := privilegedInstructions[decodedInstr.def.name]; ok {
-			return false, fmt.Errorf("user program tried to use the follwing instruction: %s", decodedInstr.def.name)
-		}
 	}
 
 	return false, nil
@@ -98,6 +86,30 @@ func init() {
 
 	// TODO: Add hooks to other existing instructions to implement kernel
 	// support.
+
+	// hook to deny read for user
+	instrRead.addHook(func(c *cpu, args [3]uint8) (bool, error) {
+		if c.kernel.Mode == "user" {
+			return false, fmt.Errorf("privileged instruction 'read' attempted in user mode")
+		}
+		return false, nil // Continue with the normal execution if not in user mode
+	})
+
+	// hook to deny write for user
+	instrWrite.addHook(func(c *cpu, args [3]uint8) (bool, error) {
+		if c.kernel.Mode == "user" {
+			return false, fmt.Errorf("privileged instruction 'write' attempted in user mode")
+		}
+		return false, nil // Continue with the normal execution if not in user mode
+	})
+
+	// hook to deny halt for user
+	instrHalt.addHook(func(c *cpu, args [3]uint8) (bool, error) {
+		if c.kernel.Mode == "user" {
+			return false, fmt.Errorf("privileged instruction 'halt' attempted in user mode")
+		}
+		return false, nil // Continue with the normal execution if not in user mode
+	})
 
 	var (
 		// syscall <code>
