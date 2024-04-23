@@ -12,23 +12,39 @@ import "fmt"
 
 // need to keep track of the time slicing operations such as the timer, instructions within a slice, etc
 type kernelCpuState struct {
-	// TODO: Fill this in.
-	Mode              string // user or kernel mode
-	InterruptsEnabled bool
-	SyscallID         int
-	TrapHandlerAddr   uint32
-	TimerTickCount    uint32
+	kernelMode        bool   // "kernel" or "user"
+	InterruptsEnabled bool   // If interrupts are enabled
+	SyscallID         int    // Active syscall ID, -1 if none
+	TrapHandlerAddr   word   // Address of the trap handler routine
+	TimerTickCount    uint32 // Timer ticks count
+	InstructionCount  uint32 // Count of instructions executed in the current slice
+	TimerFires        uint32 // How many times the timer has fired (128 instruction slices completed)
 }
 
 // The initial kernel state when the CPU boots.
 var initKernelCpuState = kernelCpuState{
-	// TODO: Fill this in.
-	Mode:              "kernel",
-	InterruptsEnabled: false,
-	SyscallID:         -1,     // no syscall
-	TrapHandlerAddr:   0x0000, // need to figure out where the trap handler is at?
+	kernelMode:        true,
+	InterruptsEnabled: true,
+	SyscallID:         -1,
+	TrapHandlerAddr:   word(0), // we just put 0 for now //use a label as the place to put the trap handler address -- this is done in the asm code
 	TimerTickCount:    0,
+	InstructionCount:  0,
+	TimerFires:        0,
 }
+
+func switchToKernelTrap(c *cpu) {
+	c.kernel.kernelMode = true // Switch CPU to kernel mode
+	c.kernel.SyscallID = -1    // Indicate no active syscall
+	// Set the trap handler address or a specific error handler address
+	c.registers[7] = c.kernel.TrapHandlerAddr // Assuming r7 is used for the instruction pointer
+
+	fmt.Println("Switched to kernel mode due to an illegal operation in user mode.")
+}
+
+// we still need a way to save where the current iptr was in r7 befoer we switch to the kernel trap or else we lost execution
+// cannot just store in the kernelCPU state
+
+// we may need to restore where the iptr was when coming out of the trap handeler too
 
 // A hook which is executed at the beginning of each instruction step.
 //
@@ -47,6 +63,15 @@ var initKernelCpuState = kernelCpuState{
 
 func (k *kernelCpuState) preExecuteHook(c *cpu) (bool, error) {
 	// TODO: Fill this in.
+
+	k.InstructionCount++ // Increment instruction count with every CPU step
+
+	// Check if the timer slice has completed
+	if k.InstructionCount >= 128 {
+		k.TimerFires++
+		k.InstructionCount = 0
+		fmt.Print("\nTimer fired!\n")
+	}
 
 	// get the current iptr
 	iptr := c.registers[7] //ptr lives at r7
@@ -101,24 +126,28 @@ func init() {
 	// hook to deny read for user
 	// everytime a priviledged instr happens -- we need the CPU to switch back to the kernel mode and then tell the kernel we switched back because of an illegal instr
 	instrRead.addHook(func(c *cpu, args [3]uint8) (bool, error) {
-		if c.kernel.Mode == "user" {
-			return false, fmt.Errorf("privileged instruction 'read' attempted in user mode")
+		if c.kernel.kernelMode == false {
+			switchToKernelTrap(c)
+			return true, nil //should just be nil -- we do not want a program in userland to make an error to our CPU
+
 		}
 		return false, nil // Continue with the normal execution if not in user mode
 	})
 
 	// hook to deny write for user
 	instrWrite.addHook(func(c *cpu, args [3]uint8) (bool, error) {
-		if c.kernel.Mode == "user" {
-			return false, fmt.Errorf("privileged instruction 'write' attempted in user mode")
+		if c.kernel.kernelMode == false {
+			switchToKernelTrap(c)
+			return true, nil
 		}
 		return false, nil // Continue with the normal execution if not in user mode
 	})
 
 	// hook to deny halt for user
 	instrHalt.addHook(func(c *cpu, args [3]uint8) (bool, error) {
-		if c.kernel.Mode == "user" {
-			return false, fmt.Errorf("privileged instruction 'halt' attempted in user mode")
+		if c.kernel.kernelMode == false {
+			switchToKernelTrap(c)
+			return true, nil
 		}
 		return false, nil // Continue with the normal execution if not in user mode
 	})
@@ -160,7 +189,7 @@ func init() {
 					// halt the cpu
 					return instrHalt.cb(c, [3]byte{}) // just call halt
 				default:
-					return fmt.Errorf("this syscall is undefined %d", syscallNum)
+					return fmt.Errorf("this syscall is undefined %d", syscallNum) // we may not want to error here because a user program will hurt the CPU
 				}
 			},
 			validate: nil,
@@ -168,9 +197,29 @@ func init() {
 
 		// TODO: Add other instructions that can be used to implement a kernel.
 
-		// we need a way to add the ability to set the internal state of the cpu --- go back in lecture around 45 mins -- something with traphandler
+		// a new CPU instruction used to set the trap handler address --- used like setTrapHandler registerNum
+		// instr  --take this value from this register and store it into the trap handler fromt the cpu
+
+		// assembly code should  call this instruction
+
+		instrSetTrapHandler = &instr{
+			name: "setTrapHandler",
+			cb: func(c *cpu, args [3]byte) error {
+				// args[0] is expected to be the register containing the trap handler address
+				regIndex := args[0] // assuming the register index is passed directly
+				if regIndex >= 8 {  // need to also make sure the register is not r7
+					return fmt.Errorf("register index out of bounds")
+				}
+
+				// set the trap handler address in the CPU's kernel state
+				c.kernel.TrapHandlerAddr = word(uint32(c.registers[regIndex])) // Convert word to uint32 if necessary
+				return nil
+			},
+			validate: nil, // Add validation as necessary
+		}
 	)
 
 	// Add kernel instructions to the instruction set.
 	instructionSet.add(instrSyscall)
+	instructionSet.add(instrSetTrapHandler)
 }
