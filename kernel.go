@@ -64,8 +64,10 @@ func switchToKernelTrap(c *cpu) {
 func (k *kernelCpuState) preExecuteHook(c *cpu) (bool, error) {
 	// TODO: Fill this in.
 
-	k.InstructionCount++ // Increment instruction count with every CPU step
+	if c.kernel.kernelMode == false {
+		k.InstructionCount++ // Increment instruction count with every CPU step
 
+	}
 	// Check if the timer slice has completed
 	if k.InstructionCount >= 128 {
 		k.TimerFires++
@@ -76,7 +78,7 @@ func (k *kernelCpuState) preExecuteHook(c *cpu) (bool, error) {
 	// get the current iptr
 	iptr := c.registers[7] //ptr lives at r7
 	if int(iptr) >= len(c.memory) {
-		return true, fmt.Errorf("instr pointer out of bounds: %v", iptr) // halt and go back to kernel state
+		return true, fmt.Errorf("instr pointer out of bounds: %v", iptr) // halt and go back to kernel state // switchBackToKernel()
 
 	}
 
@@ -86,7 +88,7 @@ func (k *kernelCpuState) preExecuteHook(c *cpu) (bool, error) {
 	_, err := c.instructions.decode(instr) // do i need the decodedInstr??? YES
 
 	if err != nil {
-		return true, fmt.Errorf("Trying to decode the instruction failed: %v", err) //this isto mitigate vulnerability at main.go 181  // halt and go back to kernel state
+		return true, fmt.Errorf("Trying to decode the instruction failed: %v", err) //this is to mitigate vulnerability at main.go 181  // halt and go back to kernel state
 	}
 
 	// need a way to also check it fails to execute an instruction too
@@ -152,6 +154,14 @@ func init() {
 		return false, nil // Continue with the normal execution if not in user mode
 	})
 
+	instrHalt.addHook(func(c *cpu, args [3]uint8) (bool, error) {
+		if c.kernel.kernelMode == false {
+			switchToKernelTrap(c)
+			return true, nil
+		}
+		return false, nil // Continue with the normal execution if not in user mode
+	})
+
 	var (
 		// syscall <code>
 		//
@@ -189,7 +199,7 @@ func init() {
 					// halt the cpu
 					return instrHalt.cb(c, [3]byte{}) // just call halt
 				default:
-					return fmt.Errorf("this syscall is undefined %d", syscallNum) // we may not want to error here because a user program will hurt the CPU
+					return fmt.Errorf("this syscall is undefined %d", syscallNum) // we may not want to error here because a user program will hurt the CPU // maybe switch back to trapHandler
 				}
 			},
 			validate: nil,
